@@ -1,0 +1,16 @@
+import random
+
+def generate_packages(num_packages=10):
+    packages = []
+    for _ in range(num_packages):
+        width = random.randint(200, 300)
+        height = random.randint(150, 200)
+        depth = random.randint(200, 300)
+        value = random.randint(0, 150)
+        packages.append((width, height, depth, value))
+    return packages
+
+packages = generate_packages()
+
+for package in packages:
+    print(f"{package} ,")
