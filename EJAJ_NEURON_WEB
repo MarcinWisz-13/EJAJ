@@ -1,0 +1,127 @@
+import os
+import cv2
+import numpy as np
+from sklearn.model_selection import train_test_split
+import tensorflow as tf
+from tensorflow.keras import layers, models
+from sklearn.preprocessing import LabelEncoder
+
+
+def LoadData():
+    # Ścieżka do danych
+    data_dir = "C:\\Users\\Marcin\\PycharmProjects\\ProjektSieciNeuronowe\\data"
+
+    images = []
+    labels = []
+    folder_to_label = {}  # Mapowanie nazw folderów na etykiety
+    label_counter = 0  # Licznik etykiet
+
+    # Rekurencyjne przechodzenie po katalogach i podkatalogach
+    for root, dirs, files in os.walk(data_dir):
+        if root == data_dir:  # Ignorujemy główny katalog 'data'
+            continue
+
+        folder_name = os.path.basename(root)
+        print(f"Processing folder: {folder_name}")
+
+        # Przypisanie unikalnej etykiety do każdego folderu
+        if folder_name not in folder_to_label:
+            folder_to_label[folder_name] = label_counter
+            label_counter += 1
+
+        for img_file in files:
+            if img_file.lower().endswith(('.png', '.jpg', '.jpeg')):
+                img_path = os.path.join(root, img_file)
+                img = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
+
+                if img is None:
+                    print(f"Warning: Couldn't load image {img_path}. Skipping...")
+                    continue
+
+                img = cv2.resize(img, (224, 224))
+                images.append(img)
+                labels.append(folder_to_label[folder_name])
+
+    # Konwersja na tablice NumPy
+    images = np.array(images, dtype=np.float32)
+    labels = np.array(labels, dtype=np.int64)
+
+    # Dodanie wymiaru kanału (dla TensorFlow)
+    images = np.expand_dims(images, axis=-1)
+
+    # Wyświetlenie etykiet przypisanych do folderów
+    print("\nEtykiety przypisane do folderów:")
+    for folder, label in folder_to_label.items():
+        print(f"Folder '{folder}' -> Label {label}")
+
+    # Podział na zbiory
+    X_train, X_temp, y_train, y_temp = train_test_split(images, labels, test_size=0.3, stratify=labels, random_state=42)
+    X_val, X_test, y_val, y_test = train_test_split(X_temp, y_temp, test_size=0.5, stratify=y_temp, random_state=42)
+
+    # Sprawdzenie kształtu danych
+    print(f"Training set shape: {X_train.shape}")
+    print(f"Validation set shape: {X_val.shape}")
+    print(f"Test set shape: {X_test.shape}")
+
+    # Konwersja do tensorów
+    train_ds = tf.data.Dataset.from_tensor_slices((X_train, y_train)).batch(32).shuffle(1000)
+    val_ds = tf.data.Dataset.from_tensor_slices((X_val, y_val)).batch(32)
+    test_ds = tf.data.Dataset.from_tensor_slices((X_test, y_test)).batch(32)
+
+    # Augmentacja
+    data_augmentation = tf.keras.Sequential([
+        tf.keras.layers.RandomFlip("horizontal"),
+        tf.keras.layers.RandomRotation(0.1),
+        tf.keras.layers.RandomZoom(0.2),
+        tf.keras.layers.Rescaling(1. / 255)  # Normalizacja
+    ])
+
+    # Zastosowanie augmentacji do zbioru treningowego
+    train_ds = train_ds.map(lambda x, y: (data_augmentation(x), y))
+
+    return train_ds, val_ds, test_ds
+
+
+def BuildModel(input_shape):
+    model = models.Sequential([
+        layers.Input(shape=input_shape),
+        layers.Conv2D(32, (3, 3), activation='relu'),
+        layers.MaxPooling2D((2, 2)),
+        layers.Conv2D(64, (3, 3), activation='relu'),
+        layers.MaxPooling2D((2, 2)),
+        layers.Conv2D(64, (3, 3), activation='relu'),
+        layers.MaxPooling2D((2, 2)),
+        layers.Flatten(),
+        layers.Dense(64, activation='relu'),
+        layers.Dense(10, activation='softmax')  # Dostosuj liczbę klas, jeśli to konieczne
+    ])
+
+    # Kompilacja modelu
+    model.compile(
+        optimizer='adam',
+        loss='sparse_categorical_crossentropy',
+        metrics=['accuracy']
+    )
+    return model
+
+
+def TrainModel(train_ds, val_ds, test_ds):
+    model = BuildModel(input_shape=(224, 224, 1))
+
+    history = model.fit(
+        train_ds,
+        epochs=10,
+        validation_data=val_ds
+    )
+
+    # Ewaluacja na zbiorze testowym
+    test_loss, test_acc = model.evaluate(test_ds)
+    print(f"Test accuracy: {test_acc}")
+
+    # Zapisanie modelu
+    model.save('gesture_recognition_model.h5')
+
+
+if __name__ == '__main__':
+    train_ds, val_ds, test_ds = LoadData()
+    TrainModel(train_ds, val_ds, test_ds)
